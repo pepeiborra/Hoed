@@ -3,10 +3,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiWayIf            #-}
--- This file is part of the Haskell debugger Hoed.
---
--- Copyright (c) Maarten Faddegon, 2015
-
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DeriveGeneric         #-}
@@ -14,6 +10,10 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedLists       #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
+-- This file is part of the Haskell debugger Hoed.
+--
+-- Copyright (c) Maarten Faddegon, 2015
 
 module Debug.Hoed.CompTree
 ( CompTree
@@ -41,9 +41,9 @@ module Debug.Hoed.CompTree
 , traceInfo
 , Graph(..) -- re-export from LibGraph
 )where
-import           Control.Exception
+import           Control.DeepSeq
+import           Control.Exception as E
 import           Control.Monad
-import           Control.Monad.ST
 import           Debug.Hoed.EventForest
 import           Debug.Hoed.Observe
 import           Debug.Hoed.Render
@@ -57,7 +57,7 @@ import           Data.IntSet            (IntSet)
 import           Data.List              (foldl', unfoldr)
 import           Data.Maybe
 import           Data.Semigroup
-import           Data.Vector.Mutable as VM (STVector)
+import           Data.Vector.Mutable as VM (IOVector)
 import qualified Data.Vector.Generic.Mutable as VM
 import qualified Data.Vector.Unboxed    as U
 import           Data.Word
@@ -67,6 +67,11 @@ import           Prelude                hiding (Right)
 
 data Vertex = RootVertex | Vertex {vertexStmt :: CompStmt, vertexJmt :: Judgement}
   deriving (Eq,Show,Ord,Generic)
+
+instance NFData AssistedMessage
+instance NFData Judgement
+instance NFData Vertex
+instance (NFData a, NFData b) => NFData (Arc a b)
 
 getJudgement :: Vertex -> Judgement
 getJudgement RootVertex = Right
@@ -194,12 +199,12 @@ data EventDetails = EventDetails
 topLvlFun :: EventDetails -> UID
 topLvlFun EventDetails{topLvlFun_ = TopLvlFun x} = x
 
-type EventDetailsStore s = VM.STVector s EventDetails
+type EventDetailsStore s = VM.IOVector EventDetails
 
-getEventDetails :: EventDetailsStore s -> UID -> ST s EventDetails
+getEventDetails :: EventDetailsStore s -> UID -> IO EventDetails
 getEventDetails = VM.unsafeRead
 
-setEventDetails :: EventDetailsStore s -> UID -> EventDetails -> ST s ()
+setEventDetails :: EventDetailsStore s -> UID -> EventDetails -> IO ()
 setEventDetails = VM.unsafeWrite
 
 
@@ -253,7 +258,7 @@ addMessage _ _ t = t
 #endif
 ------------------------------------------------------------------------------------------------------------------------
 
-collectEventDetails :: EventDetailsStore s -> Event -> ST s (Bool,UID)
+collectEventDetails :: EventDetailsStore s -> Event -> IO (Bool,UID)
 collectEventDetails v e = do
             let !p = eventParent e
             parentDetails <- getEventDetails v (parentUID p)
@@ -264,7 +269,7 @@ collectEventDetails v e = do
 -- When we see a Fun event whose parent is not a Fun event it is a top level Fun event,
 -- otherwise just copy the reference to the top level Fun event from the parent.
 -- A top level Fun event references itself.
-mkFunDetails :: EventDetailsStore s -> Event -> ST s EventDetails
+mkFunDetails :: EventDetailsStore s -> Event -> IO EventDetails
 mkFunDetails s e = do
     let p = eventParent e
     ed  <- getEventDetails s (parentUID p)
@@ -457,12 +462,13 @@ corToCons cm e = case U.unsafeIndex cm (parentUID p - 1) of
 
 ------------------------------------------------------------------------------------------------------------------------
 
-traceInfo :: Int -> Trace -> TraceInfo
-traceInfo l trc = runST $ do
+traceInfo :: Int -> Trace -> IO TraceInfo
+traceInfo l trc = do
   -- Practically speaking, event UIDs start in 1
   v <- VM.replicate (l+1) $ EventDetails noTopLvlFun (const False)
-  let loop !s e =
-        case change e of
+  let loop !s e = do
+        when (eventUID e `mod` l100 == 0) $ putStr "."
+        case (change e) of
           Observe {} -> do
             setEventDetails v (eventUID e) (EventDetails noTopLvlFun (const True))
             return s
@@ -487,8 +493,11 @@ traceInfo l trc = runST $ do
             return $ if loc
               then stop e details s
               else resume e details s
-  F.foldlM loop s0 trc
+  res <- F.foldlM loop s0 trc
+  putStrLn ""
+  return res
   where
+    l100 = l `div` 100
     s0 :: TraceInfo
     s0 = TraceInfo [] []
 #if defined(TRANSCRIPT)
