@@ -29,6 +29,7 @@ library
                        , Debug.NoHoed
                        , Debug.Hoed.CompTree
                        , Debug.Hoed.Render
+                       , Data.Frame
   other-modules:       Debug.Hoed.Compat
                        , Debug.Hoed.EventForest
                        , Debug.Hoed.ReadLine
@@ -37,6 +38,7 @@ library
                        , Debug.Hoed.Prop
                        , Debug.Hoed.Serialize
                        , Debug.Hoed.Span
+                       , Data.Rope.Mutable
                        , Text.PrettyPrint.FPretty
                        , Paths_Hoed
   build-depends:       base >= 4 && <5
@@ -49,6 +51,7 @@ library
                        , directory
                        , cereal, bytestring
                        , QuickCheck >= 2.10
+                       , primitive
                        , semigroups
                        , strict
                        , template-haskell
