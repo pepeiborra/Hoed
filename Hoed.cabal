@@ -36,6 +36,7 @@ library
                        , Debug.Hoed.Fields
                        , Debug.Hoed.Prop
                        , Debug.Hoed.Serialize
+                       , Debug.Hoed.Span
                        , Text.PrettyPrint.FPretty
                        , Paths_Hoed
   build-depends:       base >= 4 && <5
@@ -47,6 +48,7 @@ library
                        , regex-tdfa
                        , directory
                        , cereal, bytestring
+                       , QuickCheck >= 2.10
                        , semigroups
                        , strict
                        , template-haskell
