@@ -157,7 +157,7 @@ eventsToCDS pairs = getChild 0 0
 
      cons !t !h = h : t
 
-     mid_arr :: Array Int [Pair Word8 CDS]
+     mid_arr :: Array Int [Pair Int CDS]
      mid_arr = accumArray cons [] bnds
                 [ (pnode, (pport :!: res node))
                 | (Event node (Parent pnode pport) change) <- toList pairs
@@ -176,13 +176,13 @@ eventsToCDS pairs = getChild 0 0
                                            (normalizeCDS <$> getChild node 1)
         (Cons portc cons)
                             -> simplifyCons node cons
-                                 [getChild node (fromIntegral n) | n <- [0::Int .. fromIntegral portc - 1]]
+                                 [getChild node n | n <- [0 .. portc - 1]]
 
      getId []                 i  = i
      getId (CDSFun i _ _:_) _    = i
      getId (_:cs)             i  = getId cs i
 
-     getChild :: Int -> Word8 -> CDSSet
+     getChild :: Int -> Int -> CDSSet
      getChild pnode pport =
        [ content
        | pport' :!: content <- (!) mid_arr pnode

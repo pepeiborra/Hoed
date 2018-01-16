@@ -274,7 +274,7 @@ data RequestDetails = RD Int Explanation
 
 data ReturnDetails
   = ReturnFun
-  | ReturnCons { constructor :: String, arity :: Word8, value :: String }
+  | ReturnCons { constructor :: String, arity :: Int, value :: String }
 
 data Explanation
   = Observation String
