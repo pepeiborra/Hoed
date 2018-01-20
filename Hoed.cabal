@@ -77,3 +77,5 @@ Test-Suite test-queens
                     , QuickCheck
                     , Hoed
   default-language: Haskell2010
+
+  ghc-options:         -rtsopts
