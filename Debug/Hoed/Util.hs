@@ -33,3 +33,9 @@ stopWatch  = do
   where
        toSecs :: TimeSpec -> Seconds
        toSecs spec = Seconds $ fromIntegral(sec spec) + fromIntegral(nsec spec) * 1e-9
+
+-- local nub for sorted lists
+nubSorted :: Eq a => [a] -> [a]
+nubSorted []        = []
+nubSorted (a:a':as) | a == a' = nubSorted (a' : as)
+nubSorted (a:as)    = a : nubSorted as
