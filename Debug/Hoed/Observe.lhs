@@ -6,10 +6,6 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeFamilies  #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -53,37 +49,32 @@ This was ported for the version found on www.haskell.org/hood.
 
 \begin{code}
 module Debug.Hoed.Observe
-{-
   (
    -- * The main Hood API
-  
-  , observe
-  , Observer(..)   -- contains a 'forall' typed observe (if supported).
+    observe
   , Observable(..) -- Class
 
    -- * For advanced users, that want to render their own datatypes.
   , (<<)           -- (Observable a) => ObserverM (a -> b) -> a -> ObserverM b
   , thunk          -- (Observable a) => a -> ObserverM a        
-  , nothunk
   , send
   , observeBase
   , observeOpaque
-  , observedTypes
+  , constrainBase
   , Generic
   , Trace
   , Event(..)
+  , EventWithId(..)
   , Change(..)
   , Parent(..)
   , UID
   , ParentPosition
-  , ThreadId(..)
   , isRootEvent
   , initUniq
-  , startEventStream
   , endEventStream
   , ourCatchAllIO
   , peepUniq
-  ) -} where
+  ) where
 \end{code}
 
 
@@ -96,33 +87,23 @@ module Debug.Hoed.Observe
 \begin{code}
 import Prelude hiding (Right)
 import qualified Prelude
-import Control.Concurrent.MVar
 import Control.Monad
 import Data.Array as Array
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as H
-import Data.IORef
 import Data.List (sortOn)
+import Data.IORef
 import Data.Maybe
 import Data.Monoid ((<>))
-import Data.Proxy
-import Data.Rope.Mutable (Rope, new', write, reset)
-import Data.Strict.Tuple (Pair(..))
 import Data.Text (Text, pack)
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
-import Data.Vector.Unboxed (Vector)
-import Data.Vector.Unboxed.Deriving
-import Data.Vector.Unboxed.Mutable (MVector)
 import Data.Word
 import Debug.Hoed.Fields
+-- import Debug.Hoed.InProcess -- TODO Weave a custom sendEvent with Backpack
+import Debug.Hoed.Streaming -- TODO Weave a custom sendEvent with Backpack
+import Debug.Hoed.Types
 import Debug.Trace
-
 import GHC.Generics
-
-import Data.IORef
 import System.IO.Unsafe
-
 \end{code}
 
 \begin{code}
@@ -135,133 +116,6 @@ import Control.Exception (throw, SomeException(..))
                 ) as Exception
 -}
 import Data.Dynamic ( Dynamic )
-
-\end{code}
-
-%************************************************************************
-%*                                                                      *
-\subsection{Event stream}
-%*                                                                      *
-%************************************************************************
-
-Trival output functions
-
-\begin{code}
-
-type UID = Int
-
-data Event = Event { eventParent :: {-# UNPACK #-} !Parent
-                   , change      ::                !Change  }
-        deriving (Eq,Generic)
-
-data EventWithId = EventWithId {eventUID :: !UID, event :: !Event}
-
-data Change
-        = Observe          !Text
-        | Cons     !Word8  !Text
-        | ConsChar         !Char
-        | Enter
-        | Fun
-        deriving (Eq, Show,Generic)
-
-type ParentPosition = Word8
-
-data Parent = Parent
-        { parentUID      :: !UID            -- my parents UID
-        , parentPosition :: !ParentPosition -- my branch number (e.g. the field of a data constructor)
-        } deriving (Eq,Generic)
-
-instance Show Event where
-  show e = (show . change $ e) ++ " (" ++ (show . eventParent $ e) ++ ")"
-
-instance Show EventWithId where
-  show (EventWithId uid e) = (show uid) ++ ": " ++ (show . change $ e) ++ " (" ++ (show . eventParent $ e) ++ ")"
-
-instance Show Parent where
-  show p = "P " ++ (show . parentUID $ p) ++ " " ++ (show . parentPosition $ p)
-
-root = Parent (-1) 0
-
-isRootEvent :: Event -> Bool
-isRootEvent e = case change e of Observe{} -> True; _ -> False
-\end{code}
-
-\begin{code}
-type Trace = Vector Event
-
-endEventStream :: IO Trace
-endEventStream = do
-  (stringsCount :!: stringsHashTable) <- takeMVar strings
-  let unsortedStrings = H.toList stringsHashTable
-  putMVar strings (0 :!: mempty)
-  let stringsTable = V.unsafeAccum (\_ -> id) (V.replicate stringsCount (error "uninitialized")) [(i,s) | (s,i) <- unsortedStrings]
-  writeIORef stringsLookupTable stringsTable
-  reset (Proxy :: Proxy Vector) events
-
-sendEvent :: Int -> Parent -> Change -> IO ()
-sendEvent nodeId !parent !change = do
-  write events nodeId (Event parent change)
-
-lookupOrAddString :: Text -> IO Int
-lookupOrAddString s = do
-  (stringsCount :!: stringsTable) <- readMVar strings
-  case H.lookup s stringsTable of
-    Just x  -> return x
-    Nothing -> do
-      (stringsCount :!: stringsTable) <- takeMVar strings
-      let (count',table', res) =
-            case H.lookup s stringsTable of
-              Just x -> (stringsCount, stringsTable, x)
-              Nothing ->
-                (stringsCount+1, H.insert s stringsCount stringsTable, stringsCount)
-      putMVar strings (count' :!: table')
-      return res
-
--- Global store of unboxed events.
--- Since we cannot unbox Strings, these are represented as references to the
---  strings table
-{-# NOINLINE events #-}
-events :: Rope IO MVector Event
-events = unsafePerformIO $ do
-  rope <- new' 10000  -- size of the lazy vectors internal to the rope structure
-  return rope
-
-{-# NOINLINE strings #-}
-strings :: MVar(Pair Int (HashMap Text Int))
-strings = unsafePerformIO $ do
-  newMVar (0 :!: mempty)
-
-{-# NOINLINE stringsLookupTable #-}
-stringsLookupTable :: IORef (V.Vector Text)
-stringsLookupTable = unsafePerformIO $ newIORef  mempty
-
-lookupString id = unsafePerformIO $ (V.! id) <$> readIORef  stringsLookupTable
-
-derivingUnbox "Change"
-    [t| Change -> (Word8, Word8, Int) |]
-    [| \case
-            Observe  s -> (0,0,unsafePerformIO(lookupOrAddString s))
-            Cons c   s -> (1,c,unsafePerformIO(lookupOrAddString s))
-            ConsChar c -> (2,0,fromEnum c)
-            Enter      -> (3,0,0)
-            Fun        -> (4,0,0)
-     |]
-    [| \case (0,_,s) -> Observe (lookupString s)
-             (1,c,s) -> Cons c  (lookupString s)
-             (2,_,c) -> ConsChar (toEnum c)
-             (3,_,_) -> Enter
-             (4,_,_) -> Fun
-     |]
-
-derivingUnbox "Parent"
-    [t| Parent -> (UID, ParentPosition) |]
-    [| \ (Parent a b) -> (a,b) |]
-    [| \ (a,b) -> Parent a b |]
-
-derivingUnbox "Event"
-    [t| Event -> (Parent, Change) |]
-    [| \(Event a b) -> (a,b) |]
-    [| \ (a,b) -> Event a b |]
 
 \end{code}
 

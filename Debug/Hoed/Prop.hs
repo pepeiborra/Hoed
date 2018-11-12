@@ -10,7 +10,7 @@ module Debug.Hoed.Prop where
 -- , Propositions(..)
 -- ) where
 import qualified Data.Vector.Generic as VG
-import Debug.Hoed.Observe(EventWithId(..), Observable(..),Trace(..),UID,Event(..),Change(..),ourCatchAllIO,evaluate,eventParent,parentPosition)
+import Debug.Hoed.Observe(EventWithId(..), Observable(..),Trace(..),UID,Event(..),Change(..),ourCatchAllIO,eventParent,parentPosition)
 import Debug.Hoed.Render(CompStmt(..),noNewlines)
 import Debug.Hoed.CompTree(CompTree,Vertex(..),Graph(..),vertexUID,vertexRes,replaceVertex,getJudgement,setJudgement)
 import Debug.Hoed.EventForest(EventForest,mkEventForest,dfsChildren)
@@ -631,6 +631,9 @@ class GParEq rep where
 
 orNothing :: IO (Maybe Bool) -> Maybe Bool
 orNothing mb = unsafePerformIO $ ourCatchAllIO mb (\_ -> return Nothing)
+
+evaluate :: a -> IO a
+evaluate a = a `seq` return a
 
 catchEq :: Eq a => a -> a -> Maybe Bool
 catchEq x y = orNothing $ do mb <- evaluate (x == y); return (Just mb)

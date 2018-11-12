@@ -41,7 +41,7 @@ defaultRopeDim = 10000
 
 {-# INLINE write #-}
 write :: forall v a m . (PrimMonad m, MVector v a) => Rope m v a -> Int -> a -> m ()
-write Rope {..} (fromEnum -> ix) a = join $ atomicModifyMutVar' ropeState updateState
+write Rope {..} ix a = join $ atomicModifyMutVar' ropeState updateState
   where
     (d, r) = divMod ix ropeDim
     updateState :: RopeState m v a -> (RopeState m v a, m ())
