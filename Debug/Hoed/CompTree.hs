@@ -1,7 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE MultiWayIf            #-}
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE CPP                   #-}
@@ -49,6 +47,7 @@ import           Debug.Hoed.EventForest
 import           Debug.Hoed.Observe
 import           Debug.Hoed.Span
 import           Debug.Hoed.Render
+import           Debug.Hoed.Streaming
 import           Debug.Hoed.Util
 
 import           Data.Bits
@@ -64,6 +63,7 @@ import           Data.Maybe
 import           Data.Semigroup
 import           Data.Text (Text, pack, unpack)
 import qualified Data.Text as T
+import qualified Data.Vector.Fusion.Bundle.Monadic as BM
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as VM
 import           Data.Vector.Mutable as VM (IOVector)
@@ -345,7 +345,7 @@ addDependency _e s =
               (n:m:_) -> Just (m, n)
 
         m = case d of
-             Nothing       -> addMessage _e ("does not add dependency")
+             Nothing       -> addMessage _e "does not add dependency"
              (Just (a, b)) -> addMessage _e ("adds dependency " ++ show a ++ " -> " ++ show b)
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -354,11 +354,11 @@ type ConsMap = U.Vector Word
 
 --- Iff an event is a constant then the UID of its parent and its ParentPosition
 --- are elements of the ConsMap.
-mkConsMap :: Trace -> ConsMap
-mkConsMap t =
-  U.create $ do
-    v <- VM.replicate (VG.length t) 0
-    VG.forM_ t $ \e ->
+mkConsMapStreaming :: StreamingTrace v -> IO ConsMap
+mkConsMapStreaming t = do
+  l <- BM.length t
+  v <- VM.replicate l 0
+  flip BM.mapM_ t $ \e ->
       when (isCons (change e)) $ do
           let p = eventParent e
 #if __GLASGOW_HASKELL__ >= 800
@@ -368,7 +368,7 @@ mkConsMap t =
           x <- VM.unsafeRead v ix
           VM.unsafeWrite v ix (x `setBit` fromIntegral(parentPosition p))
 #endif
-    return v
+  VG.freeze v
   where
     isCons Cons{} = True
     isCons ConsChar{} = True
@@ -382,13 +382,16 @@ corToCons cm e = case U.unsafeIndex cm (parentUID p) of
 
 ------------------------------------------------------------------------------------------------------------------------
 
-traceInfo :: Verbosity -> Trace -> IO TraceInfo
+traceInfo :: Verbosity -> StreamingTrace v -> IO TraceInfo
 traceInfo verbose trc = do
+  l <- BM.length trc
+  let l100 = max 1 (l `div` 100)
+  cs <- mkConsMapStreaming trc
   condPutStr verbose "Calculating the edges of the computation graph"
   v <- VM.replicate l $ EventDetails noTopLvlFun (const False)
-  let loop !s uid e = do
+  let loop !s (uid,e) = do
         when (uid `mod` l100 == 0) $ condPutStr verbose "."
-        case (change e) of
+        case change e of
           Observe {} -> do
             setEventDetails v uid (EventDetails noTopLvlFun (const True))
             return s
@@ -413,15 +416,11 @@ traceInfo verbose trc = do
             return $ if loc
               then stop e details s
               else resume e details s
-  VG.ifoldM' loop s0 trc
+  BM.foldM' loop s0 (BM.indexed trc)
   where
-    l = VG.length trc
-    l100 = max 1 (l `div` 100)
     s0 :: TraceInfo
     s0 = TraceInfo [] []
 #if defined(TRANSCRIPT)
            IntMap.empty
 #endif
-    cs :: ConsMap
-    cs = mkConsMap trc
 

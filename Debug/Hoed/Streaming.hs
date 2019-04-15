@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase       #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 module Debug.Hoed.Streaming
@@ -10,7 +10,6 @@ module Debug.Hoed.Streaming
   , endEventStream
   , endEventStreamHandle
   -- for testing
-  , endEventStreamB
   , encode
   , decode
   , reorderBy
@@ -28,11 +27,12 @@ import Data.Text (pack, unpack)
 import qualified Data.Vector.Generic as V
 import qualified Data.Vector.Generic.Mutable as VM
 import Data.Vector.Fusion.Stream.Monadic (Stream(..), Step(..))
-import Data.Vector.Fusion.Bundle.Monadic (Bundle(..), fromStream)
+import Data.Vector.Fusion.Bundle.Monadic (Bundle(..), fromStream, cons)
 import qualified Data.Vector.Fusion.Bundle.Monadic as B
+import qualified Data.Vector.Fusion.Stream.Monadic as S
 import Data.Vector.Fusion.Bundle.Size
 import Data.Vector.Unboxed (Vector)
-import Debug.Hoed.Types(Change(..), Event(..), EventWithId(..), Parent(..))
+import Debug.Hoed.Types(StreamingTrace, Trace, Change(..), Event(..), EventWithId(..), Parent(..), initEvent)
 import System.Environment
 import System.FilePath
 import System.IO
@@ -42,10 +42,7 @@ import System.IO.Unsafe
 import Control.Concurrent.MVar
 import Data.Strict.Tuple (Pair(..))
 import qualified Data.HashMap.Strict as H
-import Debug.Hoed.InProcess (strings, stringsLookupTable)
-
-type Trace = Vector Event
-type StreamingTrace v = Bundle IO v EventWithId
+import Debug.Hoed.Strings
 
 {-# NOINLINE sink #-}
 sink :: (FilePath, Handle)
@@ -60,8 +57,7 @@ counter :: IORef Int
 counter = unsafePerformIO $ newIORef 0
 
 sendEvent :: Int -> Parent -> Change -> IO ()
-sendEvent idx p c = do
-  sendEventToHandle (snd sink) idx p c
+sendEvent = sendEventToHandle (snd sink)
 
 sendEventToHandle :: Handle -> Int -> Parent -> Change -> IO ()
 sendEventToHandle handle nodeId parent change = do
@@ -110,43 +106,34 @@ readNat = foldl' f 0
   where
     f d c = d * 10 + ord c - 48
 
--- | Ends the logging and returns the raw complete trace
-endEventStreamB :: Handle -> FilePath -> IO (StreamingTrace v)
-endEventStreamB h fp = do
+-- | Ends the logging, sets up the string table, and returns the pure trace.
+endEventStreamHandle :: Handle -> FilePath -> IO (StreamingTrace v)
+endEventStreamHandle h fp = do
   hClose h
   -- Reopen the file in Read mode
   -- Read to a stream of events
   -- The stream can be processed in constant memory
-  let s = readEvents $ openFile fp ReadMode
-  u <- readIORef counter
-  putStrLn $ "endEventStreamB: " ++ show u ++ " events"
-  return $ fromStream s (Exact u)
+  let trace  = readEvents $ openFile fp ReadMode
+  -- For legacy reasons, the sequence starts with a dummy init event
+  trace <- return $ S.cons (EventWithId 0 initEvent) trace
+  eventCount <- readIORef counter
+  putStrLn $ "endEventStreamHandle: " ++ show eventCount ++ " events"
 
--- | Ends the logging, sets up the string table, and returns the pure trace.
-endEventStreamHandle ::
-  V.Vector v Event => Handle -> FilePath -> IO (v Event)
-endEventStreamHandle h fp = do
-  b <- endEventStreamB h fp
-  trace <- VM.munstream (fmap event (reorderBy eventUID 1 b))
-
-  -- create string table for storable instances, in case they are used
-  -- if they are not used, the table will be empty
-  (stringsCount :!: stringsHashTable) <- takeMVar strings
+  -- create string table for Unbox instances, in case they are used
+  -- TODO remove this when no longer needed
+  flip S.mapM_ trace $ \case
+            EventWithId _ (Event _ (Observe  s)) -> void $ lookupOrAddString s
+            EventWithId _ (Event _ (Cons c   s)) -> void $ lookupOrAddString s
+            _ -> return ()
+  (stringsCount :!: stringsHashTable) <- readMVar strings
   let unsortedStrings = H.toList stringsHashTable
-  putMVar strings (0 :!: mempty)
-  let stringsTable = V.unsafeAccum (\_ -> id) (V.replicate stringsCount (error "uninitialized")) [(i,s) | (s,i) <- unsortedStrings]
+  let stringsTable = V.unsafeAccum (const id) (V.replicate stringsCount (error "uninitialized")) [(i,s) | (s,i) <- unsortedStrings]
   writeIORef stringsLookupTable stringsTable
 
-  V.unsafeFreeze trace
+  return $ fmap event $ reorderBy eventUID 0 $ fromStream trace (Exact $ eventCount+1)
 
-initEvent = Event (Parent 0 0) (Observe "init")
-
-endEventStream :: IO Trace
-endEventStream = do
-  trace <- endEventStreamHandle (snd sink) (fst sink)
-  -- For legacy reasons, the sequence starts with a dummy init event
-  let trace' = V.cons initEvent trace
-  return trace'
+endEventStream :: IO (StreamingTrace v)
+endEventStream = endEventStreamHandle (snd sink) (fst sink)
 
 data ReorderState a
   = Buffer !Int
@@ -176,7 +163,7 @@ reorderBy ix i0 b@(sElems-> Stream step st) = fromStream s (sSize b)
           stepst <- step st
           return $ case stepst of
             Skip st -> Skip (acc,st)
-            Yield x st -> do
+            Yield x st ->
               if ix x == i
                 then Yield x (Discharge (i+1) buf, st)
                 else Skip (Buffer i (insertBy (compare `on` ix) x buf), st)

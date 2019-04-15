@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ImplicitParams  #-}
@@ -200,7 +199,9 @@ module Debug.Hoed
 
 import Control.DeepSeq
 import Control.Monad
+import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Generic.Mutable as VM
 import           Debug.Hoed.CompTree
 import           Debug.Hoed.Console
 import           Debug.Hoed.Observe
@@ -246,7 +247,7 @@ firstRun = unsafePerformIO $ newIORef True
 
 
 -- | run some code and return the Trace
-debugO :: IO a -> IO Trace
+debugO :: IO a -> IO (StreamingTrace v)
 debugO program =
      do { runOnce
         ; initUniq
@@ -354,17 +355,17 @@ runO' HoedOptions{..} program = let ?statementWidth = prettyWidth in do
 #if defined(DEBUG)
   writeFile ".Hoed/Events"     (unlines . map show $ toList events)
 #endif
-
+  l <- B.length events
   condPutStrLn verbose "\n=== Statistics ===\n"
-  condPutStrLn verbose $ show (VG.length events) ++ " events"
+  condPutStrLn verbose $ show l ++ " events"
   condPutStrLn verbose"Please wait while the computation tree is constructed..."
 
   tTrace <- stopWatch
   ti  <- traceInfo verbose events
   traceTime <- tTrace
   condPutStrLn verbose $ " " ++ show traceTime
-
-  let cdss = eventsToCDS events
+  eventsV <- VG.freeze =<< VM.munstream events
+  let cdss = eventsToCDS eventsV
       eqs  = renderCompStmts cdss
   let !ds  = force $ dependencies ti
       ct   = mkCompTree eqs ds
@@ -405,7 +406,7 @@ runO' HoedOptions{..} program = let ?statementWidth = prettyWidth in do
 
   let compTime = traceTime + cdsTime + eqsTime
   condPutStrLn verbose $ "\n=== Debug Session (" ++ show compTime ++ ") ===\n"
-  return $ HoedAnalysis events ct
+  return $ HoedAnalysis eventsV ct
 
 isPowerOf n 0 = False
 isPowerOf n k | n == k         = True

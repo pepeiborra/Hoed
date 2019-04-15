@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Queens where
 -- The queens problem made famous by Wirth.
+module Queens where
 import Debug.Hoed
 import Data.List
 import Test.QuickCheck

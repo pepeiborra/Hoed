@@ -21,6 +21,9 @@ import qualified Data.IntMap as Map
 import Data.Primitive.MutVar
 import Data.Proxy
 import qualified Data.Vector as V
+import qualified Data.Vector.Fusion.Bundle.Monadic as B
+import qualified Data.Vector.Fusion.Bundle.Size as Size
+import qualified Data.Vector.Fusion.Stream.Monadic as S
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as M
 import Data.Vector.Generic.Mutable as M (MVector, read, new)
@@ -67,24 +70,26 @@ new' ropeDim = do
   ropeState <- newMutVar (RopeState (-1) mempty spillOver)
   return Rope{..}
 
--- | Returns an immutable snapshot of the rope contents after resetting the rope to the empty state
-reset :: forall v a m .
-  (VG.Vector v a, PrimMonad m) => Proxy v -> Rope m (VG.Mutable v) a -> m (v a)
-reset proxy it@Rope {..} = do
-  (lastIndex, ropeDim, ropeElements) <-
-    atomicModifyMutVar' ropeState $ \RopeState {..} ->
-      (RopeState (-1) mempty spillOver, (ropeLastIndex, ropeDim, ropeElements))
-  lv <-
-    forM
-      [0 .. if Map.null ropeElements
-              then -1
-              else maximum (Map.keys ropeElements)] $ \i ->
-      case Map.lookup i ropeElements of
-        Just x -> VG.unsafeFreeze x
-        Nothing -> fail $ "block missing: " ++ show i -- VG.new ropeDim
-  let joined :: v a
-        | h:t <- lv = VG.slice 0 (lastIndex + 1) $ VG.concat lv
-        | otherwise = VG.empty
+-- | Reset the rope to the empty state, returning the current contents
+reset :: forall v v' a m .
+  (VG.Vector v a, PrimMonad m) => Rope m (VG.Mutable v) a -> m (B.Bundle m v' a)
+reset it@Rope {..} = do
+  RopeState{..} <-
+    atomicModifyMutVar' ropeState $ \old ->
+                                      (RopeState (-1) mempty (spillOver old), old)
+  let lv =
+        [ case Map.lookup i ropeElements of
+            Just x -> M.mstream x
+            Nothing -> error $ "block missing: " ++ show i -- VG.new ropeDim
+        | i <- [0 .. if Map.null ropeElements
+                    then -1
+                    else maximum (Map.keys ropeElements)]
+        ]
+  let joined
+        | h:t <- lv
+        , s <- S.slice 0 (ropeLastIndex + 1) $ S.concatMap id (S.fromList lv)
+        = B.fromStream s (Size.Exact (ropeLastIndex+1))
+        | otherwise = B.empty
   return joined
 
 fromList :: forall v m a. (PrimMonad m, MVector v a) => Int -> [a] -> m(Rope m v a)

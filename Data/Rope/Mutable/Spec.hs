@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -19,6 +21,7 @@ import Data.Proxy
 import Data.Rope.Mutable
 import Data.Semigroup(Semigroup(..))
 import Data.Vector (Vector)
+import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import qualified Data.Vector.Generic as V
 import Numeric.Natural
 import Test.Hspec
@@ -86,45 +89,44 @@ implementation proxy model = do
       r <- go model
       ii <- get
       _ <- lift $ fixGaps r ii
-      _ <- lift $ reset proxy r
+      _ <- lift $ reset r
       put []
       return r
 
-propSpec :: _ => Proxy v -> Spec
+propSpec :: forall v. _ => Proxy v -> Spec
 propSpec proxy =
   describe "Properties" $ do
     prop "V.toList . Rope.reset . Rope.fromList = id" $ \(Positive dim) (xx :: [Bool]) -> do
-      r <- reset proxy =<< fromList dim xx
-      V.toList r `shouldBe` xx
+      r <- reset @v =<< fromList dim xx
+      B.toList r `shouldReturn` xx
     prop "lists are a model" $ \(script :: MutableRopeModel Bool) -> do
-      res <- implementation proxy script >>= reset proxy
-      V.toList res `shouldBe` interpretation script
+      res <- implementation proxy script >>= reset
+      B.toList res `shouldReturn` interpretation script
 
-unitSpec :: _ => Proxy (v :: * -> *) -> Spec
+unitSpec :: forall (v :: * -> *) . _ => Proxy v -> Spec
 unitSpec proxy = do
     describe "new" $ do
       it "should work" $
-        shouldReturn ([] :: [()]) $ \_ -> return ()
+        shouldReturnV ([] :: [()]) $ \_ -> return ()
     describe "unit" $ do
       describe "from new" $ do
-        it "on 0" $ shouldReturn [()] $ \r ->
+        it "on 0" $ shouldReturnV [()] $ \r ->
           write r 0 ()
         it "on 1" $ shouldBarf $ \r ->
           write r 1 ()
         prop "random" $ \(NonEmpty xx) -> let Positive m = maximum xx in
-          shouldReturn [0 .. m] $ \r -> do
+          shouldReturnV [0 .. m] $ \r -> do
             let uninitialized = [Positive 0 .. Positive m] \\ xx
             forM_ (xx ++ uninitialized) $ \(Positive i) ->
               write r i i
   where
-    shouldReturn list f = do
+    shouldReturnV list f = do
       rope <- new' testSize
       f rope
-      r <- reset proxy rope
-      V.toList r `shouldBe` list
+      r <- reset @v rope
+      B.toList r `shouldReturn` list
     shouldBarf f = do
       rope <- new' testSize
       f rope
-      r <- reset proxy rope
-      void $ evaluate (force $ V.toList r)
-     `shouldThrow` \ErrorCall{} -> True
+      r <- reset @v rope
+      (B.mapM_ (evaluate . force) r) `shouldThrow` \ErrorCall{} -> True

@@ -37,22 +37,6 @@ spec = do
         forAll genChange $ \c -> readChange (showsChange c "") == c
     describe "event" $ do
       it "decode . encode == id" $ forAll genEvent $ \x -> decode (encode x "") == x
-  describe "sendEvent" $ do
-    sendEventTest "no events" $ \h fp -> do
-      evs <- endEventStreamB h fp
-      BM.toList evs `shouldReturn` []
-    sendEventTest "one event" $ \h fp -> do
-      sendEventToHandle h 0 (Parent (-1) 0) (Observe "hello")
-      evs <- endEventStreamB h fp
-      BM.toList evs `shouldReturn`
-        [EventWithId 0 $ Event (Parent (-1) 0) (Observe "hello")]
-    sendEventTest "two events" $ \h fp -> do
-      sendEventToHandle h 1 (Parent 0 0) Enter
-      sendEventToHandle h 0 (Parent (-1) 0) (Observe "hello")
-      evs <- endEventStreamB h fp
-      BM.toList evs `shouldReturn`
-        [EventWithId 1 $ Event (Parent 0 0) Enter
-        ,EventWithId 0 $ Event (Parent (-1) 0) (Observe "hello")]
 
   describe "endEventStream(Boxed)" $ endEventsSpec @Boxed.Vector
   describe "endEventStream(Unboxed)" $ endEventsSpec @Unboxed.Vector
@@ -61,17 +45,19 @@ endEventsSpec :: forall (v :: * -> *) . V.Vector v Event => Spec
 endEventsSpec = do
   sendEventTest "no events" $ \h fp -> do
     evs <- endEventStreamHandle @v h fp
-    V.toList evs `shouldBe` []
+    BM.toList evs `shouldReturn` [initEvent]
   sendEventTest "one event" $ \h fp -> do
     sendEventToHandle h 0 (Parent (-1) 0) (Observe "hello")
     evs <- endEventStreamHandle @v h fp
-    V.toList evs `shouldBe` [Event (Parent (-1) 0) (Observe "hello")]
+    BM.toList evs `shouldReturn` [initEvent, Event (Parent (-1) 0) (Observe "hello")]
   sendEventTest "two events" $ \h fp -> do
-    sendEventToHandle h 1 (Parent 0 0) Enter
-    sendEventToHandle h 0 (Parent (-1) 0) (Observe "hello")
+    sendEventToHandle h 2 (Parent 0 0) Enter
+    sendEventToHandle h 1 (Parent (-1) 0) (Observe "hello")
     evs <- endEventStreamHandle @v h fp
-    V.toList evs `shouldBe`
-      [Event (Parent (-1) 0) (Observe "hello"), Event (Parent 0 0) Enter]
+    BM.toList evs `shouldReturn`
+      [ initEvent
+      , Event (Parent (-1) 0) (Observe "hello")
+      , Event (Parent 0 0) Enter]
 
 sendEventTest name k = it name $
   bracket
