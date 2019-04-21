@@ -98,7 +98,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import Data.Word
 import Debug.Hoed.Fields
-import Debug.Hoed.InProcess() -- TODO Weave a custom sendEvent with Backpack
+-- import Debug.Hoed.InProcess -- TODO Weave a custom sendEvent with Backpack
 import Debug.Hoed.Streaming -- TODO Weave a custom sendEvent with Backpack
 import Debug.Hoed.Types
 import Debug.Trace
