@@ -87,11 +87,6 @@ instance Hashable Vertex where
 
 instance NFData Vertex
 
--- FIXME These orphan instances should be moved to libgraph
-instance NFData AssistedMessage
-instance NFData Judgement
-instance (NFData a, NFData b) => NFData (Arc a b)
-
 getJudgement :: Vertex -> Judgement
 getJudgement RootVertex = Right
 getJudgement v          = vertexJmt v
