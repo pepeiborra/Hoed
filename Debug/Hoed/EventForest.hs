@@ -20,7 +20,9 @@ module Debug.Hoed.EventForest
 , dfsChildren
 , elems
 ) where
+import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import Debug.Hoed.Observe
+import Debug.Hoed.Types
 import Data.IntMap (IntMap)
 import Data.Vector.Generic (ifoldl)
 import qualified Data.IntMap as IntMap
@@ -36,8 +38,8 @@ isRoot e = case change e of Observe{} -> True; _ -> False
 elems :: EventForest -> [[(ParentPosition, EventWithId)]]
 elems = IntMap.elems
 
-addEvent :: EventForest -> UID -> Event -> EventForest
-addEvent frt uid e
+addEvent :: EventForest -> (UID, Event) -> EventForest
+addEvent frt (uid,e)
   | isRoot e = frt
   | otherwise = IntMap.insert i s frt
   where i  = parentUID . eventParent $ e
@@ -46,9 +48,8 @@ addEvent frt uid e
         s  = case ms of Nothing   -> [(p,EventWithId uid e)]
                         (Just s') ->  (p,EventWithId uid e) : s'
 
-
-mkEventForest :: Trace -> EventForest
-mkEventForest trc = ifoldl addEvent IntMap.empty trc
+mkEventForest :: StreamingTrace v -> IO EventForest
+mkEventForest = B.foldl' addEvent IntMap.empty . B.indexed
 
 parentUIDLookup :: UID -> EventForest  -> [(ParentPosition,EventWithId)]
 parentUIDLookup i frt = case IntMap.lookup i frt of

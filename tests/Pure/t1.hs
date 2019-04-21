@@ -3,7 +3,6 @@
 import Control.Monad
 import qualified Data.Vector.Generic as V
 import Debug.Hoed
-import Debug.Hoed.Console
 import System.Process(system)
 import System.Exit(exitWith, ExitCode(..))
 

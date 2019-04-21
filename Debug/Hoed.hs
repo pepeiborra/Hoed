@@ -139,50 +139,16 @@ I am keen to hear about your experience with Hoed: where did you find it useful 
 module Debug.Hoed
   ( -- * Basic annotations
     observe
-  , runO
-  , printO
-  , testO
-  , runOwith
   , HoedOptions(..)
   , defaultHoedOptions
-
-  -- * Property-assisted algorithmic debugging
-  , runOwp
-  , printOwp
-  , testOwp
-  , Propositions(..)
-  , PropType(..)
-  , Proposition(..)
-  , mkProposition
-  , ofType
-  , withSignature
-  , sizeHint
-  , withTestGen
-  , TestGen(..)
-  , PropositionType(..)
-  , Module(..)
-  , Signature(..)
-  , ParEq(..)
-  , (===)
-  , runOstore
-  , conAp
 
   -- * Build your own debugger with Hoed
   , HoedAnalysis(..)
   , runO'
-  , judge
-  , unjudgedCharacterCount
   , CompTree
   , Vertex(..)
   , CompStmt(..)
-  , Judge(..)
   , Verbosity(..)
-
-  -- * API to test Hoed itself
-  , logO
-  , logOwp
-  , traceOnly
-  , UnevalHandler(..)
 
    -- * The Observable class
   , Observable(..)
@@ -195,19 +161,21 @@ module Debug.Hoed
   , debugO
   , CDS
   , Generic
+
+  -- * API to test Hoed itself
+  , logO
+  , showGraph
   ) where
 
 import Control.DeepSeq
+import Control.Exception
 import Control.Monad
 import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as VM
 import           Debug.Hoed.CompTree
-import           Debug.Hoed.Console
 import           Debug.Hoed.Observe
-import           Debug.Hoed.Prop
 import           Debug.Hoed.Render
-import           Debug.Hoed.Serialize
 import           Debug.Hoed.Util
 
 import           Data.Foldable (toList)
@@ -269,59 +237,6 @@ debugO program =
 --   main = runO $ do print (triple 3)
 --                    print (triple 2)
 -- @
-
-runO :: IO a -> IO ()
-runO program = do
-  window <- size
-  let w = maybe (prettyWidth defaultHoedOptions) width window
-  runOwith defaultHoedOptions{prettyWidth=w, verbose=Verbose} program
-
-runOwith :: HoedOptions -> IO a -> IO ()
-runOwith options program = do
-  HoedAnalysis{..} <- runO' options program
-  debugSession hoedTrace hoedCompTree []
-  return ()
-
--- | Hoed internal function that stores a serialized version of the tree on disk (assisted debugging spawns new instances of Hoed).
-runOstore :: String -> IO a -> IO ()
-runOstore tag program = do
-  HoedAnalysis{..} <- runO' defaultHoedOptions{verbose=Silent} program
-  storeTree (treeFilePath ++ tag) hoedCompTree
-  storeTrace (traceFilePath ++ tag) hoedTrace
-
--- | Repeat and trace a failing testcase
-testO :: Show a => (a->Bool) -> a -> IO ()
-testO p x = runO $ putStrLn $ if p x then "Passed 1 test."
-                                     else " *** Failed! Falsifiable: " ++ show x
-
--- | Use property based judging.
-
-runOwp :: [Propositions] -> IO a -> IO ()
-runOwp ps program = do
-  HoedAnalysis{..} <- runO' defaultHoedOptions{verbose=Verbose} program
-  let compTree' = hoedCompTree
-  debugSession hoedTrace compTree' ps
-  return ()
-
--- | Repeat and trace a failing testcase
-testOwp :: Show a => [Propositions] -> (a->Bool) -> a -> IO ()
-testOwp ps p x = runOwp ps $ putStrLn $
-  if p x then "Passed 1 test."
-  else " *** Failed! Falsifiable: " ++ show x
-
--- | Short for @runO . print@.
-printO :: (Show a) => a -> IO ()
-printO expr = runO (print expr)
-
-
-printOwp :: (Show a) => [Propositions] -> a -> IO ()
-printOwp ps expr = runOwp ps (print expr)
-
--- | Only produces a trace. Useful for performance measurements.
-traceOnly :: IO a -> IO ()
-traceOnly program = do
-  _ <- debugO program
-  return ()
 
 
 data HoedAnalysis = HoedAnalysis
@@ -419,23 +334,6 @@ logO filePath program = {- SCC "logO" -} do
   HoedAnalysis{..} <- runO' defaultHoedOptions{verbose=Verbose} program
   writeFile filePath (showGraph hoedCompTree)
   return ()
-
--- | As logO, but with property-based judging.
-logOwp :: UnevalHandler -> FilePath -> [Propositions] -> IO a -> IO ()
-logOwp handler filePath properties program = do
-  HoedAnalysis{..} <- runO' defaultHoedOptions{verbose=Verbose} program
-  hPutStrLn stderr "\n=== Evaluating assigned properties ===\n"
-  compTree' <- judgeAll handler unjudgedCharacterCount hoedTrace properties hoedCompTree
-  writeFile filePath (showGraph compTree')
-  return ()
-
-  where showGraph g        = showWith g showVertex showArc
-        showVertex RootVertex = ("root","")
-        showVertex v       = ("\"" ++ (escape . showCompStmt) v ++ "\"", "")
-        showArc _          = ""
-        showCompStmt s     = (show . vertexJmt) s ++ ": " ++ (show . vertexStmt) s
-
-
 #if __GLASGOW_HASKELL__ >= 710
 -- NOTE: This instance is orphaned here deliberately.
 --       Moving it will break polymorphic observations in GHC 8.2x
@@ -444,3 +342,10 @@ instance {-# OVERLAPPABLE #-} Observable a where
   observer = observeOpaque "<?>"
   constrain _ _ = error "constrained by untraced value"
 #endif
+
+showGraph g = showWith g showVertex showArc
+  where
+    showVertex RootVertex = ("\".\"", "shape=none")
+    showVertex v          = ("\"" ++ (escape . showCompStmt) v ++ "\"", "")
+    showArc _ = ""
+    showCompStmt = show . vertexStmt
