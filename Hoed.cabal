@@ -30,7 +30,6 @@ library
                        , Debug.Hoed.Render
   other-modules:       Debug.Hoed.Compat
                        , Debug.Hoed.EventForest
-                       , Debug.Hoed.ReadLine
                        , Debug.Hoed.Fields
                        , Debug.Hoed.InProcess
                        , Debug.Hoed.Span
