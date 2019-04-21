@@ -177,6 +177,7 @@ import           Debug.Hoed.CompTree
 import           Debug.Hoed.Observe
 import           Debug.Hoed.Render
 import           Debug.Hoed.Util
+import           Debug.Hoed.Types (Trace)
 
 import           Data.Foldable (toList)
 import           Data.IORef
@@ -280,9 +281,9 @@ runO' HoedOptions{..} program = let ?statementWidth = prettyWidth in do
   traceTime <- tTrace
   condPutStrLn verbose $ " " ++ show traceTime
   eventsV <- VG.freeze =<< VM.munstream events
-  let cdss = eventsToCDS eventsV
-      eqs  = renderCompStmts cdss
-  let !ds  = force $ dependencies ti
+  cdss <- eventsToCDS events
+  let eqs  = renderCompStmts cdss
+      !ds  = force $ dependencies ti
       ct   = mkCompTree eqs ds
 
   condPutStr verbose "Calculating the nodes of the computation graph"

@@ -62,7 +62,6 @@ module Debug.Hoed.Observe
   , observeOpaque
   , constrainBase
   , Generic
-  , Trace
   , StreamingTrace
   , Event(..)
   , EventWithId(..)

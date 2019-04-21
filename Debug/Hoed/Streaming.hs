@@ -4,7 +4,6 @@
 {-# LANGUAGE ViewPatterns #-}
 module Debug.Hoed.Streaming
   ( StreamingTrace
-  , Trace
   , sendEvent
   , sendEventToHandle
   , endEventStream
@@ -32,7 +31,7 @@ import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import qualified Data.Vector.Fusion.Stream.Monadic as S
 import Data.Vector.Fusion.Bundle.Size
 import Data.Vector.Unboxed (Vector)
-import Debug.Hoed.Types(StreamingTrace, Trace, Change(..), Event(..), EventWithId(..), Parent(..), initEvent)
+import Debug.Hoed.Types(StreamingTrace, Change(..), Event(..), EventWithId(..), Parent(..), initEvent)
 import System.Environment
 import System.FilePath
 import System.IO

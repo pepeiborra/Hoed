@@ -42,7 +42,10 @@ import           Data.Primitive.MutVar
 import           Data.Text (Text, pack, unpack)
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Vector.Fusion.Bundle.Monadic as BM
 import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Generic.Mutable as VM
+import qualified Data.Vector.Unboxed as VU
 import           Data.Word
 import           Debug.Hoed.Compat
 import           Debug.Hoed.Observe
@@ -178,47 +181,47 @@ instance IsList ParentList where
   toList = unfoldr (\case ParentNil -> Nothing ; ParentCons pp pc t -> Just (Parent pp pc,t))
   fromList = foldr (\(Parent pp pc) t -> ParentCons pp pc t) ParentNil
 
-eventsToCDS :: Trace -> CDSSet
-eventsToCDS pairs = getChild (-1) 0
-   where
+eventsToCDS :: StreamingTrace v -> IO CDSSet
+eventsToCDS pairsB = do
+  l <- BM.length pairsB
+  mid_arr <- VM.replicate l ParentNil
+  pairs <- VU.unsafeFreeze =<< VM.munstream pairsB
 
-     -- res i = out_arr VG.! i
-     res i = getNode'' i (change (pairs VG.! i))
+  let mid_pairs = BM.map (\(node, Event (Parent pnode pport) _) ->
+                               (pnode+1, Parent node pport))
+                $ BM.filter (\(_,e) -> change e /= Enter)
+                $ BM.indexed pairsB
+  flip BM.mapM_ mid_pairs $ \(i, Parent pp pc) ->
+    VM.modify mid_arr (ParentCons pp pc) i
 
-     mid_arr :: V.Vector ParentList
-     mid_arr = VG.unsafeAccumulate
-                  (\i (Parent pp pc) -> ParentCons pp pc i)
-                  (V.replicate (VG.length pairs) ParentNil)
-                  ( VG.map (\(node, Event (Parent pnode pport) _) ->
-                              (pnode+1, Parent node pport))
-                  $ VG.filter (\(_,e) -> change e /= Enter)
-                  $ VG.convert
-                  $ VG.indexed pairs)
+  mid_arr <- V.unsafeFreeze mid_arr
 
-     getNode'' ::  Int -> Change -> CDS
-     getNode'' node change =
-       case change of
-        Observe str         -> let chd = normalizeCDS <$> getChild node 0
-                               in CDSNamed str (getId chd node) chd
-        Enter               -> CDSEntered node
-        Fun                 -> CDSFun node (normalizeCDS <$> getChild node 0)
-                                           (normalizeCDS <$> getChild node 1)
-        ConsChar char       -> CDSChar char
-        Cons portc cons
-                            -> simplifyCons node cons
-                                 [ getChild node (fromIntegral n)
-                                 | n <- [0::Int .. fromIntegral portc - 1]]
+  let getNode'' ::  Int -> Change -> CDS
+      getNode'' node change =
+        case change of
+         Observe str         -> let chd = normalizeCDS <$> getChild node 0
+                                in CDSNamed str (getId chd node) chd
+         Enter               -> CDSEntered node
+         Fun                 -> CDSFun node (normalizeCDS <$> getChild node 0)
+                                            (normalizeCDS <$> getChild node 1)
+         ConsChar char       -> CDSChar char
+         Cons portc cons
+                             -> simplifyCons node cons
+                                  [ getChild node (fromIntegral n)
+                                  | n <- [0::Int .. fromIntegral portc - 1]]
 
-     getId []                 i  = i
-     getId (CDSFun i _ _:_) _    = i
-     getId (_:cs)             i  = getId cs i
+      getId []                 i  = i
+      getId (CDSFun i _ _:_) _    = i
+      getId (_:cs)             i  = getId cs i
 
-     getChild :: Int -> Word8 -> CDSSet
-     getChild pnode pport =
-       [ res content
-       | Parent content pport' <- toList $ mid_arr VG.! succ pnode
-       , pport == pport'
-       ]
+      getChild :: Int -> Word8 -> CDSSet
+      getChild pnode pport =
+        [ getNode'' content (change (pairs VG.! content))
+        | Parent content pport' <- toList $ mid_arr VG.! succ pnode
+        , pport == pport'
+        ]
+
+  return $ getChild (-1) 0
 
 simplifyCons :: UID -> Text -> [CDSSet] -> CDS
 simplifyCons _ "throw" [[CDSCons _ "ErrorCall" set]]
