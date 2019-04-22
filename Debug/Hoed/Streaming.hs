@@ -1,7 +1,7 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns      #-}
 module Debug.Hoed.Streaming
   ( StreamingTrace
   , sendEvent
@@ -16,55 +16,65 @@ module Debug.Hoed.Streaming
   , showsChange
   ) where
 
-import Control.Monad
-import Control.Monad.Primitive
-import Data.Char (ord)
-import Data.Function (on)
-import Data.IORef
-import Data.List
-import Data.Text (pack, unpack)
-import qualified Data.Vector.Generic as V
-import qualified Data.Vector.Generic.Mutable as VM
-import Data.Vector.Fusion.Stream.Monadic (Stream(..), Step(..))
-import Data.Vector.Fusion.Bundle.Monadic (Bundle(..), fromStream, cons)
+import           Control.Concurrent.MVar
+import           Control.Monad
+import           Control.Monad.Primitive
+import qualified Data.ByteString.Char8             as BS
+import           Data.Char                         (ord)
+import           Data.Function                     (on)
+import qualified Data.HashMap.Strict               as H
+import           Data.IORef
+import           Data.List
+import           Data.Strict.Tuple                 (Pair (..))
+import           Data.Text                         (pack, unpack)
+import           Data.Text.Encoding
+import           Data.Vector.Fusion.Bundle.Monadic (Bundle (..), cons,
+                                                    fromStream)
 import qualified Data.Vector.Fusion.Bundle.Monadic as B
+import           Data.Vector.Fusion.Bundle.Size
+import           Data.Vector.Fusion.Stream.Monadic (Step (..), Stream (..))
 import qualified Data.Vector.Fusion.Stream.Monadic as S
-import Data.Vector.Fusion.Bundle.Size
-import Data.Vector.Unboxed (Vector)
-import Debug.Hoed.Types(StreamingTrace, Change(..), Event(..), EventWithId(..), Parent(..), initEvent)
-import System.Environment
-import System.FilePath
-import System.IO
-import System.IO.Unsafe
-
--- for compatibility
-import Control.Concurrent.MVar
-import Data.Strict.Tuple (Pair(..))
-import qualified Data.HashMap.Strict as H
-import qualified Data.ByteString.Char8  as B
-import Data.Text.Encoding
-import Debug.Hoed.Strings
+import qualified Data.Vector.Generic               as V
+import qualified Data.Vector.Generic.Mutable       as VM
+import           Data.Vector.Unboxed               (Vector)
+import           Debug.Hoed.Strings
+import           Debug.Hoed.Types                  (Change (..), Event (..),
+                                                    EventWithId (..),
+                                                    Parent (..), StreamingTrace,
+                                                    initEvent)
+import           Std.IO.Buffered
+import           Std.IO.FileSystem
+import           Std.IO.Resource
+import           System.Environment
+import           System.FilePath
+import           System.IO
+import           System.IO.Unsafe
+import Data.Bits
+import Data.String
 
 {-# NOINLINE sink #-}
-sink :: (FilePath, Handle)
+sink :: (FilePath, BufferedOutput UVFileWriter, IO ())
 sink = unsafePerformIO $ do
   p <- getExecutablePath
-  let fp = p ++ ".trace"
-  h <- openBinaryFile fp WriteMode
-  hSetBuffering h (BlockBuffering $ Just 10000000)
-  return (fp,h)
+  let fp = p <> ".trace"
+  -- h <- openBinaryFile fp WriteMode
+  (h, rel) <- acquire $ initUVFile (fromString fp) (O_RDWR .|. O_CREAT) DEFAULT_MODE
+  wri <- newUVFileWriter h 0
+  buf <- newBufferedOutput wri 1024
+  return (fp,buf,rel)
 
 {-# NOINLINE counter #-}
 counter :: IORef Int
 counter = unsafePerformIO $ newIORef 0
 
 sendEvent :: Int -> Parent -> Change -> IO ()
-sendEvent = sendEventToHandle (snd sink)
+sendEvent = sendEventToHandle (snd3 sink)
 
-sendEventToHandle :: Handle -> Int -> Parent -> Change -> IO ()
+sendEventToHandle :: Output o => BufferedOutput o -> Int -> Parent -> Change -> IO ()
 sendEventToHandle handle nodeId parent change = do
   atomicModifyIORef' counter (\x ->(succ x, ()))
-  B.hPutStrLn handle $ "1 2 3 C 1 Foo" -- encode (EventWithId nodeId $ Event parent change) ""
+  -- B.hPutStrLn handle $ "1 2 3 C 1 Foo" -- encode (EventWithId nodeId $ Event parent change) ""
+  writeBuilder handle "1 2 3 C 1 Foo"
   return ()
 
 {-# INLINE encode #-}
@@ -85,11 +95,11 @@ decode s =
 
 {-# INLINE showsChange #-}
 showsChange :: Change -> ShowS
-showsChange (Observe s) = ("O " ++) . (show (unpack s) ++)
-showsChange (Cons x t)  = ("C " ++) . shows x . (' ':) . (unpack t ++)
+showsChange (Observe s)  = ("O " ++) . (show (unpack s) ++)
+showsChange (Cons x t)   = ("C " ++) . shows x . (' ':) . (unpack t ++)
 showsChange (ConsChar c) = ("D " ++) . shows (fromEnum c)
-showsChange Enter = ('E' :)
-showsChange Fun = ('F' :)
+showsChange Enter        = ('E' :)
+showsChange Fun          = ('F' :)
 
 readChange :: String -> Change
 readChange "E" = Enter
@@ -104,7 +114,7 @@ readChange other = error $ "Cannot read Change: " ++ other
 
 readInt :: String -> Int
 readInt ('-' : nat) = negate $ readNat nat
-readInt nat = readNat nat
+readInt nat         = readNat nat
 
 readNat :: String -> Int
 readNat = foldl' f 0
@@ -138,7 +148,11 @@ endEventStreamHandle h fp = do
   return $ fmap event $ reorderBy eventUID 0 $ fromStream trace (Exact $ eventCount+1)
 
 endEventStream :: IO (StreamingTrace v)
-endEventStream = endEventStreamHandle (snd sink) (fst sink)
+endEventStream = do
+  let (fp, buf, rel) = sink
+  -- res <- endEventStreamHandle buf fp
+  rel
+  return B.empty
 
 data ReorderState a
   = Buffer !Int
@@ -192,3 +206,5 @@ streamLines h = flip Stream h $ \h -> do
         else do
           l <- hGetLine h
           return $ Yield l (pure h)
+
+snd3 (_,x,_) = x
