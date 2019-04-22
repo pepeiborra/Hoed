@@ -41,6 +41,8 @@ import System.IO.Unsafe
 import Control.Concurrent.MVar
 import Data.Strict.Tuple (Pair(..))
 import qualified Data.HashMap.Strict as H
+import qualified Data.ByteString.Char8  as B
+import Data.Text.Encoding
 import Debug.Hoed.Strings
 
 {-# NOINLINE sink #-}
@@ -48,7 +50,8 @@ sink :: (FilePath, Handle)
 sink = unsafePerformIO $ do
   p <- getExecutablePath
   let fp = p ++ ".trace"
-  h <- openFile fp WriteMode
+  h <- openBinaryFile fp WriteMode
+  hSetBuffering h (BlockBuffering $ Just 10000000)
   return (fp,h)
 
 {-# NOINLINE counter #-}
@@ -60,9 +63,11 @@ sendEvent = sendEventToHandle (snd sink)
 
 sendEventToHandle :: Handle -> Int -> Parent -> Change -> IO ()
 sendEventToHandle handle nodeId parent change = do
-  _ <- atomicModifyIORef' counter (\x ->(succ x, succ x))
-  hPutStrLn handle $ encode (EventWithId nodeId $ Event parent change) ""
+  atomicModifyIORef' counter (\x ->(succ x, ()))
+  B.hPutStrLn handle $ "1 2 3 C 1 Foo" -- encode (EventWithId nodeId $ Event parent change) ""
+  return ()
 
+{-# INLINE encode #-}
 encode :: EventWithId -> ShowS
 encode (EventWithId i (Event (Parent puid ppos) change)) =
   shows i . (' ' :) . shows puid . (' ':) . shows ppos . (' ' :) . showsChange change
@@ -78,8 +83,9 @@ decode s =
            (readChange $ unwords c))
     other -> error $ "Unable to decode event: " ++ unwords other
 
+{-# INLINE showsChange #-}
 showsChange :: Change -> ShowS
-showsChange (Observe s) = ("O " ++) . (unpack s ++)
+showsChange (Observe s) = ("O " ++) . (show (unpack s) ++)
 showsChange (Cons x t)  = ("C " ++) . shows x . (' ':) . (unpack t ++)
 showsChange (ConsChar c) = ("D " ++) . shows (fromEnum c)
 showsChange Enter = ('E' :)
@@ -88,7 +94,7 @@ showsChange Fun = ('F' :)
 readChange :: String -> Change
 readChange "E" = Enter
 readChange "F" = Fun
-readChange ('O' : ' ' : s) = Observe (pack s)
+readChange ('O' : ' ' : s) = Observe (pack (read s))
 readChange ('D' : ' ' : c) = ConsChar (toEnum $ readInt c)
 readChange ('C' : ' ' : rest) = Cons w (pack s)
   where
