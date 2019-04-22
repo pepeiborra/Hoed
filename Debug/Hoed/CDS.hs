@@ -8,7 +8,20 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Debug.Hoed.CDS where
+module Debug.Hoed.CDS
+  ( CDS(..)
+  , CDSSet
+  , CDSsansUID(..)
+  , eventsToCDS
+  , findFn
+  , renderSet
+  , renderSet'
+  , grp
+  , nil
+  , sep
+  , text
+  )
+where
 
 import           Control.DeepSeq
 import           Data.Char                (isAlpha)

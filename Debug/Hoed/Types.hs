@@ -61,6 +61,15 @@ root = Parent (-1) 0
 isRootEvent :: Event -> Bool
 isRootEvent e = case change e of Observe{} -> True; _ -> False
 
+data Location = Trunk | ArgumentOf Location | ResultOf Location | FieldOf Int Location
+  deriving Eq
+
+instance Show Location where
+   show Trunk            = ""
+   show (ArgumentOf loc) = 'a' : show loc
+   show (ResultOf   loc) = 'r' : show loc
+   show (FieldOf n  loc) = 'f' : show n ++ show loc
+
 -- Storable instances
 -- ------------------
 derivingUnbox "Change"

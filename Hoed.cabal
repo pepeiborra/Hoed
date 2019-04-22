@@ -29,7 +29,6 @@ library
                        , Debug.Hoed.CompTree
                        , Debug.Hoed.Render
   other-modules:       Debug.Hoed.Compat
-                       , Debug.Hoed.EventForest
                        , Debug.Hoed.CDS
                        , Debug.Hoed.Fields
                        , Debug.Hoed.InProcess
@@ -42,26 +41,20 @@ library
                        , Text.PrettyPrint.FPretty
                        , Paths_Hoed
   build-depends:       base >= 4 && <5
-                       , array
-                       , containers
-                       , clock
-                       , deepseq
-                       , filepath
-                       , process
-                       , libgraph == 1.14
-                       , regex-tdfa
-                       , regex-tdfa-text
-                       , directory
-                       , bytestring
-                       , cereal, cereal-text, cereal-vector
-                       , hashable >= 1.2.5
                        , QuickCheck
-                       , open-browser
+                       , array
+                       , bytestring
+                       , clock
+                       , containers
+                       , deepseq
+                       , directory
+                       , filepath
+                       , hashable >= 1.2.5
+                       , libgraph == 1.14
                        , primitive
                        , semigroups
                        , strict
                        , template-haskell
-                       , terminal-size
                        , text
                        , transformers
                        , uniplate

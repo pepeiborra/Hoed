@@ -18,21 +18,7 @@ module Debug.Hoed.CompTree
 ( CompTree
 , Vertex(..)
 , mkCompTree
-, isRootVertex
-, vertexUID
-, vertexRes
-, replaceVertex
-, getJudgement
-, setJudgement
-, isRight
-, isWrong
-, isUnassessed
-, isAssisted
-, isInconclusive
-, isPassing
 , leafs
-, ConstantValue(..)
-, unjudgedCharacterCount
 #if defined(TRANSCRIPT)
 , getTranscript
 #endif
@@ -41,28 +27,23 @@ module Debug.Hoed.CompTree
 , Graph(..) -- re-export from LibGraph
 )where
 import           Control.DeepSeq
-import           Control.Exception as E
 import           Control.Monad
-import           Debug.Hoed.EventForest
+import           Debug.Hoed.Types
 import           Debug.Hoed.Observe
 import           Debug.Hoed.Span
 import           Debug.Hoed.Render
-import           Debug.Hoed.Streaming
 import           Debug.Hoed.Util
 
 import           Data.Bits
-import qualified Data.Foldable          as F
 import           Data.Graph.Libgraph
 import qualified Data.Set               as Set
 import           Data.Hashable
 import           Data.IntMap.Strict     (IntMap)
 import qualified Data.IntMap.Strict     as IntMap
 import           Data.IntSet            (IntSet)
-import           Data.List              (foldl', unfoldr)
+import           Data.List              (foldl')
 import           Data.Maybe
 import           Data.Semigroup
-import           Data.Text (Text, pack, unpack)
-import qualified Data.Text as T
 import qualified Data.Vector.Fusion.Bundle.Monadic as BM
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as VM
@@ -70,7 +51,6 @@ import           Data.Vector.Mutable as VM (IOVector)
 import qualified Data.Vector.Unboxed    as U
 import           Data.Word
 import           GHC.Exts               (IsList (..))
-import           GHC.Generics
 import           Prelude                hiding (Right)
 
 data Vertex = RootVertex | Vertex {vertexStmt :: CompStmt, vertexJmt :: Judgement}
@@ -87,75 +67,13 @@ instance Hashable Vertex where
 
 instance NFData Vertex
 
-getJudgement :: Vertex -> Judgement
-getJudgement RootVertex = Right
-getJudgement v          = vertexJmt v
-
-setJudgement :: Vertex -> Judgement -> Vertex
-setJudgement RootVertex _ = RootVertex
-setJudgement v          j = v{vertexJmt=j}
-
-isRight :: Vertex -> Bool
-isRight v      = getJudgement v == Right
-isWrong :: Vertex -> Bool
-isWrong v      = getJudgement v == Wrong
-isUnassessed :: Vertex -> Bool
-isUnassessed v = getJudgement v == Unassessed
-isAssisted :: Vertex -> Bool
-isAssisted v   = case getJudgement v of (Assisted _) -> True; _ -> False
-
-isInconclusive :: Vertex -> Bool
-isInconclusive v = case getJudgement v of
-  (Assisted ms) -> any isInconclusive' ms
-  _             -> False
-isInconclusive' :: AssistedMessage -> Bool
-isInconclusive' (InconclusiveProperty _) = True
-isInconclusive' _                        = False
-
-isPassing :: Vertex -> Bool
-isPassing v = case getJudgement v of
-  (Assisted ms) -> any isPassing' ms
-  _             -> False
-isPassing' :: AssistedMessage -> Bool
-isPassing' (PassingProperty _) = True
-isPassing' _                   = False
-
-vertexUID :: Vertex -> UID
-vertexUID RootVertex   = -1
-vertexUID (Vertex s _) = stmtIdentifier s
-
-vertexRes :: Vertex -> String
-vertexRes RootVertex = "RootVertex"
-vertexRes v          = unpack . stmtRes . vertexStmt $ v
-
 -- | The forest of computation trees. Also see the Libgraph library.
 type CompTree = Graph Vertex ()
-
-isRootVertex :: Vertex -> Bool
-isRootVertex RootVertex = True
-isRootVertex _          = False
 
 leafs :: CompTree -> [Vertex]
 leafs g = filter (not . (`Set.member` nonLeafs)) (vertices g)
   where
     nonLeafs = Set.fromList [s | Arc s t _ <- arcs g]
-
--- | Approximates the complexity of a computation tree by summing the length
--- of the unjudged computation statements (i.e not Right or Wrong) in the tree.
-unjudgedCharacterCount :: CompTree -> Int
-unjudgedCharacterCount = sum . map characterCount . filter unjudged . vertices
-  where characterCount = fromIntegral . T.length . stmtLabel . vertexStmt
-
-unjudged :: Vertex -> Bool
-unjudged = not . judged
-judged :: Vertex -> Bool
-judged v = isRight v || isWrong v
-
-replaceVertex :: CompTree -> Vertex -> CompTree
-replaceVertex g v = mapGraph f g
-  where f RootVertex = RootVertex
-        f v' | vertexUID v' == vertexUID v = v
-             | otherwise                       = v'
 
 --------------------------------------------------------------------------------
 -- Computation Tree

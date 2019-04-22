@@ -179,16 +179,12 @@ import           Debug.Hoed.Render
 import           Debug.Hoed.Util
 import           Debug.Hoed.Types (Trace)
 
-import           Data.Foldable (toList)
 import           Data.IORef
 import           Prelude                      hiding (Right)
-import           System.Clock
-import           System.Console.Terminal.Size
 import           System.Directory             (createDirectoryIfMissing)
 import           System.IO
 import           System.IO.Unsafe
 
-import           GHC.Generics
 
 import           Data.Graph.Libgraph
 
@@ -324,6 +320,7 @@ runO' HoedOptions{..} program = let ?statementWidth = prettyWidth in do
   condPutStrLn verbose $ "\n=== Debug Session (" ++ show compTime ++ ") ===\n"
   return $ HoedAnalysis eventsV ct
 
+isPowerOf :: Integral t => t -> t -> Bool
 isPowerOf n 0 = False
 isPowerOf n k | n == k         = True
               | k `mod` n == 0 = isPowerOf n (k `div` n)
@@ -344,6 +341,7 @@ instance {-# OVERLAPPABLE #-} Observable a where
   constrain _ _ = error "constrained by untraced value"
 #endif
 
+showGraph :: Graph Vertex arc -> String
 showGraph g = showWith g showVertex showArc
   where
     showVertex RootVertex = ("\".\"", "shape=none")
