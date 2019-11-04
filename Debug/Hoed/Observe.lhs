@@ -15,6 +15,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE CPP #-}
 
@@ -99,10 +100,13 @@ import qualified Prelude
 import Control.Concurrent.MVar
 import Control.Monad
 import Data.Array as Array
+import Data.Functor.Identity (Identity)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
+import Data.HashSet (HashSet)
 import Data.IORef
 import Data.List (sortOn)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe
 import Data.Monoid ((<>))
 import Data.Proxy
@@ -114,6 +118,7 @@ import qualified Data.Vector.Generic as VG
 import Data.Vector.Unboxed (Vector)
 import Data.Vector.Unboxed.Deriving
 import Data.Vector.Unboxed.Mutable (MVector)
+import Data.Void (Void)
 import Data.Word
 import Debug.Hoed.Fields
 import Debug.Trace
@@ -517,7 +522,35 @@ instance (Observable a) => Observable (IO a) where
   constrain = undefined
 \end{code}
 
+Standard Haskell libraries
 
+\begin{code}
+
+instance (Eq k, Eq a, Show k, Show a) => Observable (HashMap k a) where
+    observer = observeBase
+    constrain = constrainBase
+
+instance (Eq a, Show a) => Observable (HashSet a) where
+    observer = observeBase
+    constrain = constrainBase
+
+instance Observable a => Observable (NonEmpty a)
+
+instance Observable a => Observable (Identity a)
+
+instance Observable Text where
+    observer = observeBase
+    constrain = constrainBase
+
+instance (Eq a, Show a) => Observable (V.Vector a) where
+    observer = observeBase
+    constrain = constrainBase
+
+instance Observable Void where
+    observer = observeBase
+    constrain = constrainBase
+
+\end{code}
 
 The Exception *datatype* (not exceptions themselves!).
 
